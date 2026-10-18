@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+coverage/
+data/
+tmp/
+.env
+.env.local
+*.log
+Unselected files/
