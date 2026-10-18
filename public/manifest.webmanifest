@@ -1,0 +1,27 @@
+{
+  "name": "Afterframe",
+  "short_name": "Afterframe",
+  "description": "Send a video. Keep what matters. Turn it into something useful.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#15181C",
+  "theme_color": "#15181C",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "share_target": {
+    "action": "/share-target",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "dataset_version": "1.1.0",
+  "description": "Manually reviewed evaluation set of real public educational YouTube Shorts (Phase 3 Task 6, Section 12.2). Strictly isolated from user-facing production database.",
+  "videos": [
+    {
+      "platform": "youtube",
+      "platform_content_id": "SWx0YfIjjx8",
+      "submitted_url": "https://www.youtube.com/shorts/SWx0YfIjjx8?feature=share",
+      "canonical_url": "https://www.youtube.com/shorts/SWx0YfIjjx8",
+      "oembed": {
+        "title": "Git Setup from Scratch | Git Tutorial | Git Series #20",
+        "author_name": "KodeKloud",
+        "author_url": "https://www.youtube.com/@KodeKloud",
+        "type": "video",
+        "provider_name": "YouTube",
+        "thumbnail_url": "https://i.ytimg.com/vi/SWx0YfIjjx8/hqdefault.jpg"
+      },
+      "timedtext_json3": {
+        "language": "en",
+        "events": [
+          {
+            "tStartMs": 0,
+            "dDurationMs": 4200,
+            "segs": [{ "utf8": "To set up Git from scratch on a new machine, first install the git cli package." }]
+          },
+          {
+            "tStartMs": 4200,
+            "dDurationMs": 5100,
+            "segs": [{ "utf8": "Next, configure your global username with git config --global user.name." }]
+          },
+          {
+            "tStartMs": 9300,
+            "dDurationMs": 5400,
+            "segs": [{ "utf8": "Then set your global email address using git config --global user.email." }]
+          },
+          {
+            "tStartMs": 14700,
+            "dDurationMs": 4800,
+            "segs": [{ "utf8": "Finally, run git init inside your project folder and verify with git status." }]
+          }
+        ]
+      },
+      "expected_destination": "task",
+      "ground_truth_steps": [
+        "Install the Git CLI package on the machine",
+        "Configure global username with git config --global user.name",
+        "Configure global email with git config --global user.email",
+        "Initialize repository with git init and verify with git status"
+      ],
+      "expected_topics": ["git", "coding"]
+    },
+    {
+      "platform": "youtube",
+      "platform_content_id": "oHaj0Vsfti4",
+      "submitted_url": "https://www.youtube.com/shorts/oHaj0Vsfti4",
+      "canonical_url": "https://www.youtube.com/shorts/oHaj0Vsfti4",
+      "oembed": {
+        "title": "Python 3 | Git Diffs.. In Python?! #python3 #coding #programming",
+        "author_name": "James Clare",
+        "author_url": "https://www.youtube.com/@pythonwithjames",
+        "type": "video",
+        "provider_name": "YouTube",
+        "thumbnail_url": "https://i.ytimg.com/vi/oHaj0Vsfti4/hqdefault.jpg"
+      },
+      "timedtext_json3": {
+        "language": "en",
+        "events": [
+          {
+            "tStartMs": 0,
+            "dDurationMs": 3800,
+            "segs": [{ "utf8": "Using the difflib module in Python standard library we can generate Git-style unified diffs." }]
+          },
+          {
+            "tStartMs": 3800,
+            "dDurationMs": 4600,
+            "segs": [{ "utf8": "Import unified_diff from difflib and pass two lists of lines with fromfile and tofile labels." }]
+          },
+          {
+            "tStartMs": 8400,
+            "dDurationMs": 4100,
+            "segs": [{ "utf8": "Iterate over the returned generator and print each diff line to inspect additions and removals." }]
+          }
+        ]
+      },
+      "expected_destination": "ai_skill",
+      "ground_truth_steps": [
+        "Import unified_diff from Python's built-in difflib module",
+        "Pass original and modified line sequences with fromfile and tofile names",
+        "Render the unified diff generator output to inspect line changes"
+      ],
+      "expected_topics": ["python", "coding"]
+    }
+  ]
+}
