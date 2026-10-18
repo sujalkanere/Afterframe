@@ -8,3 +8,4 @@ tmp/
 .env.local
 *.log
 Unselected files/
+.agents/

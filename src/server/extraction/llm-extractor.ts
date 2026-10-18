@@ -120,6 +120,8 @@ export class StructuredLlmExtractor {
       };
     }
 
+    const endpoint = `${baseUrl}/chat/completions`;
+
     const availableRefs: EvidenceRefContext[] = segments.map((s) => ({
       id: s.id,
       kind: s.kind,
@@ -165,29 +167,45 @@ export class StructuredLlmExtractor {
             ];
 
       try {
-        const endpoint = `${baseUrl}/chat/completions`;
-        const resp = await safeFetch(endpoint, {
-          method: 'POST',
-          timeoutMs: this.config.timeoutMs ?? 25000,
-          allowLocalTestServer: this.isLocalAllowed(),
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: modelId,
-            temperature: 0.1,
-            response_format: { type: 'json_object' },
-            messages,
-          }),
-        });
+        let resp: Response | null = null;
+        for (let retry = 0; retry < 3; retry++) {
+          resp = await safeFetch(endpoint, {
+            method: 'POST',
+            timeoutMs: this.config.timeoutMs ?? 30000,
+            allowLocalTestServer: this.isLocalAllowed(),
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: modelId,
+              temperature: 0.1,
+              max_tokens: 3000,
+              response_format: { type: 'json_object' },
+              messages,
+            }),
+          });
 
-        if (!resp.ok) {
+          if (resp.ok) break;
+
+          // If rate limited or service overloaded, back off with exponential delay
+          if ((resp.status === 429 || resp.status === 503) && retry < 2) {
+            const delay = (retry + 1) * 3000;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+          break;
+        }
+
+        if (!resp || !resp.ok) {
+          const status = resp?.status ?? 500;
+          const errBody = await resp?.text().catch(() => '') ?? '';
+
           return {
             ok: false,
             errorCode: 'LLM_PROVIDER_FAILURE',
-            safeErrorDetails: `LLM endpoint returned HTTP ${resp.status}`,
-            userMessage: `The configured LLM endpoint returned an error (HTTP ${resp.status}). Retry analysis or draft manually.`,
+            safeErrorDetails: `LLM endpoint returned HTTP ${status}: ${errBody.slice(0, 200)}`,
+            userMessage: `The configured LLM endpoint returned an error (HTTP ${status}). Retry analysis or draft manually.`,
             findings: lastFindings,
             repairAttempts: attempt,
             providerId,
@@ -331,8 +349,40 @@ function buildSystemPrompt(
     `- schema_version: "${PIPELINE_VERSION}"`,
     `- recommended_type: "task" | "ai_skill"`,
     `- recommendation_reason: one-sentence source-grounded reason`,
-    `- task_candidate: { schema_version: "${TASK_SCHEMA_VERSION}", artifact_type: "task", title, description, steps, topics, estimated_minutes: null, deadline: null, priority: null }`,
-    `- skill_candidate: { schema_version: "${SKILL_SPEC_SCHEMA_VERSION}", artifact_type: "ai_skill", identity: { name, title, summary, description }, intended_use, non_use_conditions, trigger_examples, input_contract: { fields, notes }, workflow_steps, output_contract: { format, description, verification_criteria }, capability_declarations: ["instruction_only"], topics }`,
+    `- task_candidate: {`,
+    `    "schema_version": "${TASK_SCHEMA_VERSION}",`,
+    `    "artifact_type": "task",`,
+    `    "title": "string",`,
+    `    "description": "string",`,
+    `    "steps": [`,
+    `      { "id": "task-step-0", "position": 0, "title": "string", "description": "string", "provenance_kind": "transcript" | "inferred", "is_inferred": false, "evidence_refs": ["seg-id"] }`,
+    `    ],`,
+    `    "topics": ["topic-slug"],`,
+    `    "estimated_minutes": null,`,
+    `    "deadline": null,`,
+    `    "priority": null`,
+    `  }`,
+    `- skill_candidate: {`,
+    `    "schema_version": "${SKILL_SPEC_SCHEMA_VERSION}",`,
+    `    "artifact_type": "ai_skill",`,
+    `    "identity": { "name": "kebab-case-name", "title": "string", "summary": "string", "description": "string" },`,
+    `    "intended_use": ["string"],`,
+    `    "non_use_conditions": ["string"],`,
+    `    "trigger_examples": ["string"],`,
+    `    "input_contract": { "fields": [{ "name": "param_name", "type": "string", "required": true, "description": "string" }], "notes": null },`,
+    `    "workflow_steps": [`,
+    `      { "id": "skill-step-0", "position": 0, "title": "string", "instruction": "string", "provenance_kind": "transcript" | "inferred", "is_inferred": false, "evidence_refs": ["seg-id"] }`,
+    `    ],`,
+    `    "output_contract": {`,
+    `      "format": "markdown", // MUST be one of: "markdown", "code_diff", "structured_text", "checklist"`,
+    `      "description": "string",`,
+    `      "verification_criteria": ["string criterion 1", "string criterion 2"] // MUST be an array of strings, NOT a single string`,
+    `    },`,
+    `    "capability_declarations": ["instruction_only"],`,
+    `    "topics": ["topic-slug"]`,
+    `  }`,
+    `- CRITICAL: In skill_candidate.workflow_steps, the step text field is named "instruction" (NOT "description")!`,
+    `- CRITICAL: In skill_candidate.output_contract, "format" must be "markdown", "code_diff", "structured_text", or "checklist", and "verification_criteria" must be an array of strings!`,
     `- evidence_summary: { transcript_analyzed: true, visual_frames_analyzed: ${visualFramesCount}, visual_note: ${JSON.stringify(visualNote)} }`,
   ].join('\n');
 }
@@ -359,6 +409,10 @@ function buildRepairPrompt(
     `Your previous JSON failed server-side validation with the following errors:`,
     errLines,
     `Valid evidence IDs for evidence_refs are ONLY: [${validIds}].`,
+    `REMINDERS:`,
+    `- skill_candidate.workflow_steps requires: id, position (0-indexed integer), title, instruction (NOT description!), provenance_kind, is_inferred, evidence_refs.`,
+    `- skill_candidate.output_contract.format must be one of: 'markdown', 'code_diff', 'structured_text', 'checklist'.`,
+    `- skill_candidate.output_contract.verification_criteria must be an ARRAY of strings.`,
     `Return a repaired, complete JSON object matching the exact schema with all errors fixed.`,
   ].join('\n');
 }

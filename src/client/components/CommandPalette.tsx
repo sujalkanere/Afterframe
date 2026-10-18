@@ -9,6 +9,7 @@ import {
   Moon,
   Sparkles,
   CheckSquare,
+  Activity,
 } from 'lucide-react';
 
 export interface CommandPaletteArtifactItem {
@@ -70,7 +71,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         subtitle: 'Extract a new video link or paste a transcript',
         icon: <PlusCircle size={18} strokeWidth={1.5} />,
         action: () => {
-          onNavigate('/');
+          onNavigate('/app');
+          onClose();
+        },
+      },
+      {
+        id: 'cmd-dashboard',
+        label: 'Open Spatial Intelligence Dashboard',
+        subtitle: 'View knowledge velocity, provenance spectrum, and engine telemetry',
+        icon: <Activity size={18} strokeWidth={1.5} />,
+        action: () => {
+          onNavigate('/dashboard');
           onClose();
         },
       },

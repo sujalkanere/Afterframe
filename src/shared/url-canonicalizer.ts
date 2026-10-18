@@ -80,7 +80,8 @@ export function isPrivateOrInternalHost(rawHost: string): boolean {
     ) {
       return true;
     }
-    return true; // Disallow raw IPv6 literals for video platform URLs
+    // Allow public IPv6 addresses; private/link-local/loopback are blocked above
+    return false;
   }
 
   // Check IPv4 numeric / dotted quad / integer representations
@@ -107,8 +108,8 @@ export function isPrivateOrInternalHost(rawHost: string): boolean {
     ) {
       return true;
     }
-    // Disallow raw IPv4 literals for platform URLs
-    return true;
+    // Allow public IPv4 addresses; private/reserved ranges are blocked above
+    return false;
   }
 
   return false;

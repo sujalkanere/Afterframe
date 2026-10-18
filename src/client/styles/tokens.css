@@ -123,6 +123,10 @@ body {
   outline-offset: 2px;
 }
 
+main[tabindex='-1']:focus {
+  outline: none;
+}
+
 h1,
 h2,
 .af-display {
@@ -398,4 +402,37 @@ p {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+@keyframes af-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes af-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.96);
+  }
+}
+
+.af-spin {
+  animation: af-spin 1.4s linear infinite;
+}
+
+.af-pulse {
+  animation: af-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+[data-reduced-motion='true'] .af-spin,
+[data-reduced-motion='true'] .af-pulse {
+  animation: none !important;
 }

@@ -5,6 +5,7 @@ import {
   Settings,
   Command,
   User,
+  Activity,
 } from 'lucide-react';
 import type {
   ExtractionCandidateEnvelope,
@@ -39,6 +40,11 @@ import {
 } from './screens/ArtifactDetailScreen.js';
 import { SettingsScreen } from './screens/SettingsScreen.js';
 import { CommandPalette } from './components/CommandPalette.js';
+import { LandingScreen } from './screens/LandingScreen.js';
+import { LoginScreen } from './screens/LoginScreen.js';
+import { PrivacyScreen } from './screens/PrivacyScreen.js';
+import { TermsScreen } from './screens/TermsScreen.js';
+import { DashboardScreen } from './screens/DashboardScreen.js';
 
 interface SessionState {
   user: {
@@ -326,6 +332,41 @@ export const App: React.FC = () => {
     }
   }, [fetchLibrary, route]);
 
+  // Refresh jobs and poll while on /library if extractions are in-flight
+  useEffect(() => {
+    if (route !== '/library') return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const refreshJobs = async () => {
+      const res = await apiFetch('/api/jobs');
+      if (!res.ok || cancelled) return;
+      const data = await res.json();
+      if (cancelled) return;
+      const jobs: ReadyJobSummary[] = data.jobs ?? [];
+      setReadyJobs(jobs);
+
+      const hasInFlight = jobs.some(
+        (j) =>
+          j.status === 'queued' ||
+          j.status === 'acquiring' ||
+          j.status === 'transcribing' ||
+          j.status === 'analyzing'
+      );
+      if (hasInFlight) {
+        timer = setTimeout(refreshJobs, 2500);
+      }
+    };
+
+    refreshJobs();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [apiFetch, route]);
+
   // Load Atlas graph when in Atlas mode on /library
   useEffect(() => {
     if (route !== '/library' || viewMode !== 'atlas') return;
@@ -401,8 +442,27 @@ export const App: React.FC = () => {
     }
   };
 
-  // Hide mobile bottom navigation on Processing & Review screens (Section 6.7)
+  // Route classifications
   const isJobRoute = route.startsWith('/jobs/');
+  const isMarketingRoute =
+    route === '/' ||
+    route === '/login' ||
+    route === '/privacy' ||
+    route === '/terms';
+  const isCaptureRoute = route === '/app' || route === '/capture';
+  const isDashboardRoute = route === '/dashboard';
+
+  // Automatically redirect authenticated visitors from /login to /app
+  useEffect(() => {
+    if (
+      route === '/login' &&
+      session &&
+      !session.user.isGuest &&
+      session.user.email
+    ) {
+      navigate('/app');
+    }
+  }, [route, session, navigate]);
 
   const recentArtifacts: RecentArtifactSummary[] = libraryItems.map((it) => ({
     id: it.id,
@@ -415,123 +475,158 @@ export const App: React.FC = () => {
 
   return (
     <div className="af-shell">
-      {/* Slim Top Navigation Bar (Section 6.7) */}
-      <header
-        style={{
-          borderBottom: '1px solid var(--line)',
-          background: 'var(--surface-1)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 30,
-        }}
-      >
-        <nav
-          aria-label="Primary navigation"
-          style={{
-            maxWidth: '1240px',
-            margin: '0 auto',
-            padding: 'var(--space-3) var(--space-4)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 'var(--space-3)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)' }}>
-            <a
-              href="/"
-              onClick={(e) => {
-                e.preventDefault();
-                navigate('/');
-              }}
-              className="af-display"
-              style={{
-                fontSize: '1.5rem',
-                color: 'var(--text)',
-                textDecoration: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-              }}
-            >
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: '10px',
-                  height: '10px',
-                  borderRadius: '2px',
-                  background: 'var(--accent)',
+      {/* Instrument Header Console — only visible inside product application */}
+      {!isMarketingRoute && (
+        <header className="af-instrument-header">
+          <nav
+            aria-label="Primary navigation"
+            className="af-instrument-nav"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+              <a
+                href="/app"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate('/app');
                 }}
-                aria-hidden="true"
-              />
-              <span>Afterframe</span>
-            </a>
+                className="af-instrument-brand"
+              >
+                <img
+                  src="/brand/logo.svg"
+                  alt=""
+                  className="af-instrument-logo-emblem"
+                  aria-hidden="true"
+                />
+                <span>Afterframe</span>
+              </a>
 
-            <div className="af-top-nav-links">
+              <span className="af-instrument-beacon" title="Dual-engine spatial extractor ready">
+                <span className="af-beacon-dot" />
+                <span>Ready</span>
+              </span>
+            </div>
+
+            <div className="af-instrument-tabs" role="tablist">
               <button
                 type="button"
-                className="af-btn"
-                aria-current={route === '/' ? 'page' : undefined}
-                onClick={() => navigate('/')}
-                style={{
-                  borderColor:
-                    route === '/' ? 'var(--accent)' : 'transparent',
-                }}
+                role="tab"
+                className="af-instrument-tab"
+                aria-current={isCaptureRoute ? 'page' : undefined}
+                onClick={() => navigate('/app')}
               >
-                <PlusCircle size={18} strokeWidth={1.5} />
-                <span>Capture</span>
+                <PlusCircle size={15} strokeWidth={1.75} />
+                <span>Studio</span>
               </button>
 
               <button
                 type="button"
-                className="af-btn"
+                role="tab"
+                className="af-instrument-tab"
+                aria-current={isDashboardRoute ? 'page' : undefined}
+                onClick={() => navigate('/dashboard')}
+              >
+                <Activity size={15} strokeWidth={1.75} />
+                <span>Dashboard</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                className="af-instrument-tab"
                 aria-current={route.startsWith('/library') ? 'page' : undefined}
                 onClick={() => navigate('/library')}
-                style={{
-                  borderColor: route.startsWith('/library')
-                    ? 'var(--accent)'
-                    : 'transparent',
-                }}
               >
-                <Library size={18} strokeWidth={1.5} />
+                <Library size={15} strokeWidth={1.75} />
                 <span>Library</span>
               </button>
             </div>
-          </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <button
-              type="button"
-              className="af-btn"
-              onClick={() => setCmdkOpen(true)}
-              aria-label="Open command palette (Ctrl+K)"
-              title="Command palette (Ctrl/Cmd+K)"
-            >
-              <Command size={16} strokeWidth={1.5} />
-              <span style={{ fontSize: 'var(--text-xs)' }}>Ctrl+K</span>
-            </button>
+            <div className="af-instrument-actions">
+              <button
+                type="button"
+                className="af-cmdk-trigger"
+                onClick={() => setCmdkOpen(true)}
+                aria-label="Open command palette (Ctrl+K)"
+                title="Command palette (Ctrl/Cmd+K)"
+              >
+                <Command size={14} strokeWidth={1.5} />
+                <span>Search</span>
+                <span className="af-kbd-badge">⌘K</span>
+              </button>
 
-            <button
-              type="button"
-              className="af-btn"
-              aria-current={route === '/settings' ? 'page' : undefined}
-              onClick={() => navigate('/settings')}
-              aria-label="Account and settings"
-            >
-              <User size={16} strokeWidth={1.5} />
-              <span style={{ fontSize: 'var(--text-xs)' }}>
-                {session?.user.isGuest
-                  ? 'Guest · Settings'
-                  : session?.user.displayName || 'Account'}
-              </span>
-            </button>
-          </div>
-        </nav>
-      </header>
+              <button
+                type="button"
+                className="af-btn"
+                aria-current={route === '/settings' ? 'page' : undefined}
+                onClick={() => navigate('/settings')}
+                aria-label="Account and settings"
+                style={{ height: 36, padding: '0 var(--space-3)', fontSize: 'var(--text-xs)' }}
+              >
+                <User size={14} strokeWidth={1.5} />
+                <span>
+                  {session?.user.isGuest
+                    ? 'Guest · Settings'
+                    : session?.user.displayName || 'Account'}
+                </span>
+              </button>
+            </div>
+          </nav>
+        </header>
+      )}
 
       {/* Main Content Landmark (focused on route changes per Section 6.10) */}
-      <main ref={mainRef} tabIndex={-1} className="af-main">
+      <main
+        ref={mainRef}
+        tabIndex={-1}
+        className={isMarketingRoute ? '' : 'af-main'}
+      >
         {route === '/' && (
+          <LandingScreen
+            isLoggedIn={Boolean(
+              session && !session.user.isGuest && session.user.email
+            )}
+            onNavigateLogin={() => navigate('/login')}
+            onNavigateApp={() => navigate('/app')}
+            onNavigateTerms={() => navigate('/terms')}
+            onNavigatePrivacy={() => navigate('/privacy')}
+            theme={effectiveTheme}
+            onToggleTheme={() =>
+              handleUpdateSettings({
+                theme: effectiveTheme === 'dark' ? 'light' : 'dark',
+              })
+            }
+            reducedMotion={effectiveReducedMotion}
+          />
+        )}
+
+        {route === '/login' && (
+          <LoginScreen
+            onSignInSuccess={async () => {
+              await loadSessionAndHomeData();
+              navigate('/app');
+            }}
+            onNavigateHome={() => navigate('/')}
+            onNavigateTerms={() => navigate('/terms')}
+            onNavigatePrivacy={() => navigate('/privacy')}
+            apiFetch={apiFetch}
+          />
+        )}
+
+        {route === '/privacy' && (
+          <PrivacyScreen
+            onBack={() => navigate('/')}
+            onNavigateTerms={() => navigate('/terms')}
+          />
+        )}
+
+        {route === '/terms' && (
+          <TermsScreen
+            onBack={() => navigate('/')}
+            onNavigatePrivacy={() => navigate('/privacy')}
+          />
+        )}
+
+        {isCaptureRoute && (
           <CaptureScreen
             initialSharedUrl={searchParams.get('shared') ?? ''}
             reducedMotion={effectiveReducedMotion}
@@ -561,6 +656,22 @@ export const App: React.FC = () => {
             onOpenArtifact={(artifactId) =>
               navigate(`/artifacts/${artifactId}`)
             }
+          />
+        )}
+
+        {isDashboardRoute && (
+          <DashboardScreen
+            items={libraryItems}
+            activeJobs={readyJobs}
+            availableTopics={availableTopics}
+            retentionPolicy={session?.retentionPolicy}
+            onOpenArtifact={(id) => navigate(`/artifacts/${id}`)}
+            onOpenJob={(jobId) => navigate(`/jobs/${jobId}`)}
+            onNavigateCapture={() => navigate('/app')}
+            onNavigateLibraryWithTopic={(topicSlug) => {
+              setTopicFilter(topicSlug);
+              navigate('/library');
+            }}
           />
         )}
 
@@ -657,6 +768,7 @@ export const App: React.FC = () => {
         {route === '/library' && (
           <LibraryScreen
             items={libraryItems}
+            activeJobs={readyJobs}
             availableTopics={availableTopics}
             nextCursor={nextCursor}
             loading={libraryLoading}
@@ -690,6 +802,7 @@ export const App: React.FC = () => {
               if (nextCursor) fetchLibrary(nextCursor);
             }}
             onOpenArtifact={(id) => navigate(`/artifacts/${id}`)}
+            onOpenJob={(jobId) => navigate(`/jobs/${jobId}`)}
             onGoToCapture={() => navigate('/')}
             onFocusAtlasNode={(nodeId) => setAtlasFocusNode(nodeId)}
             onExpandAtlasCluster={(slug) => setAtlasExpandedTopic(slug)}
@@ -801,22 +914,36 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Mobile Fixed Bottom Navigation — hidden on Processing and Review screens (Section 6.7) */}
-      {!isJobRoute && (
+      {/* Mobile Fixed Bottom Navigation — hidden on Marketing, Processing and Review screens (Section 6.7) */}
+      {!isJobRoute && !isMarketingRoute && (
         <nav className="af-bottom-nav" aria-label="Mobile primary navigation">
           <button
             type="button"
             className="af-btn"
-            aria-current={route === '/' ? 'page' : undefined}
-            onClick={() => navigate('/')}
+            aria-current={isCaptureRoute ? 'page' : undefined}
+            onClick={() => navigate('/app')}
             style={{
               flex: 1,
               border: 'none',
-              color: route === '/' ? 'var(--accent)' : 'var(--text)',
+              color: isCaptureRoute ? 'var(--accent)' : 'var(--text)',
             }}
           >
             <PlusCircle size={20} strokeWidth={1.5} />
-            <span>Capture</span>
+            <span>Studio</span>
+          </button>
+          <button
+            type="button"
+            className="af-btn"
+            aria-current={isDashboardRoute ? 'page' : undefined}
+            onClick={() => navigate('/dashboard')}
+            style={{
+              flex: 1,
+              border: 'none',
+              color: isDashboardRoute ? 'var(--accent)' : 'var(--text)',
+            }}
+          >
+            <Activity size={20} strokeWidth={1.5} />
+            <span>Dashboard</span>
           </button>
           <button
             type="button"

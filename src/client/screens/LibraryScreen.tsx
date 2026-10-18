@@ -7,6 +7,10 @@ import {
   Sparkles,
   PlusCircle,
   RotateCcw,
+  Loader2,
+  ArrowRight,
+  AlertCircle,
+  Clock,
 } from 'lucide-react';
 import type { AtlasGraphResponse } from '../../server/atlas/graph-builder.js';
 import { AtlasView } from '../components/AtlasView.js';
@@ -25,8 +29,21 @@ export interface LibraryArtifactRow {
   task_completion_status: string | null;
 }
 
+export interface LibraryActiveJob {
+  id: string;
+  status: string;
+  current_stage: string;
+  platform: string;
+  canonical_url: string;
+  candidate_title: string | null;
+  recommended_type: string | null;
+  expires_at: string | null;
+  updated_at: string;
+}
+
 export interface LibraryScreenProps {
   items: LibraryArtifactRow[];
+  activeJobs?: LibraryActiveJob[];
   availableTopics: Array<{ slug: string; name: string }>;
   nextCursor: string | null;
   loading: boolean;
@@ -46,6 +63,7 @@ export interface LibraryScreenProps {
   onResetFilters: () => void;
   onLoadMore: () => void;
   onOpenArtifact: (id: string) => void;
+  onOpenJob?: (jobId: string) => void;
   onGoToCapture: () => void;
   onFocusAtlasNode: (nodeId: string | null) => void;
   onExpandAtlasCluster: (topicSlug: string) => void;
@@ -59,6 +77,7 @@ export interface LibraryScreenProps {
  */
 export const LibraryScreen: React.FC<LibraryScreenProps> = ({
   items,
+  activeJobs = [],
   availableTopics,
   nextCursor,
   loading,
@@ -78,12 +97,17 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
   onResetFilters,
   onLoadMore,
   onOpenArtifact,
+  onOpenJob,
   onGoToCapture,
   onFocusAtlasNode,
   onExpandAtlasCluster,
 }) => {
   const hasActiveFilters = Boolean(
     searchQuery.trim() || typeFilter || topicFilter
+  );
+
+  const inProgressJobs = (activeJobs ?? []).filter(
+    (j) => j.status !== 'completed' && j.status !== 'cancelled'
   );
 
   return (
@@ -147,6 +171,223 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
           </button>
         </div>
       </header>
+
+      {/* In-Progress & Active Pipelines Section */}
+      {viewMode === 'list' && inProgressJobs.length > 0 && (
+        <section
+          aria-label="In-progress extraction jobs"
+          className="af-panel"
+          style={{
+            marginBottom: 'var(--space-6)',
+            padding: 'var(--space-4)',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 'var(--space-3)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: 'var(--accent)',
+                  boxShadow: '0 0 8px var(--accent)',
+                }}
+                className={reducedMotion ? '' : 'af-pulse'}
+              />
+              <h2
+                style={{
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  color: 'var(--text)',
+                  margin: 0,
+                }}
+              >
+                In Progress &amp; Active Pipelines ({inProgressJobs.length})
+              </h2>
+            </div>
+            <span
+              style={{
+                fontSize: 'var(--text-xs)',
+                color: 'var(--text-muted)',
+              }}
+            >
+              Real-time background extractions
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+              gap: 'var(--space-3)',
+            }}
+          >
+            {inProgressJobs.map((job) => {
+              const isReady = job.status === 'needs_review';
+              const isFailed = job.status === 'failed';
+
+              let stageBadgeText = 'Processing...';
+              let stageBadgeColor = 'var(--accent-label)';
+              let StageIcon = Loader2;
+              let isSpinning = !reducedMotion;
+
+              if (isReady) {
+                stageBadgeText = 'Ready for Review';
+                stageBadgeColor = 'var(--accent-label)';
+                StageIcon = Sparkles;
+                isSpinning = false;
+              } else if (isFailed) {
+                stageBadgeText = 'Failed';
+                stageBadgeColor = 'var(--danger)';
+                StageIcon = AlertCircle;
+                isSpinning = false;
+              } else if (job.current_stage === 'analyzing') {
+                stageBadgeText = 'Synthesizing AI Skill...';
+                stageBadgeColor = 'var(--accent-label)';
+                StageIcon = Sparkles;
+                isSpinning = false;
+              } else if (job.current_stage === 'transcribing') {
+                stageBadgeText = 'Transcribing Audio...';
+                stageBadgeColor = 'var(--accent-label)';
+                StageIcon = Loader2;
+                isSpinning = !reducedMotion;
+              } else if (job.current_stage === 'acquiring') {
+                stageBadgeText = 'Acquiring Media...';
+                stageBadgeColor = 'var(--accent-label)';
+                StageIcon = Loader2;
+                isSpinning = !reducedMotion;
+              } else if (job.current_stage === 'queued') {
+                stageBadgeText = 'Queued';
+                stageBadgeColor = 'var(--text-muted)';
+                StageIcon = Clock;
+                isSpinning = false;
+              }
+
+              const displayTitle =
+                job.candidate_title?.trim() ||
+                job.canonical_url ||
+                `Extraction ${job.id.slice(0, 8)}`;
+
+              return (
+                <div
+                  key={job.id}
+                  onClick={() => onOpenJob?.(job.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onOpenJob?.(job.id);
+                    }
+                  }}
+                  style={{
+                    padding: 'var(--space-3) var(--space-4)',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    background: 'var(--surface-2)',
+                    border: isReady
+                      ? '1px solid var(--accent)'
+                      : '1px solid var(--line)',
+                    cursor: onOpenJob ? 'pointer' : 'default',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: 'var(--space-2)',
+                    transition: 'border-color 0.15s ease',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: 'var(--text-xs)',
+                        fontWeight: 600,
+                        color: stageBadgeColor,
+                      }}
+                    >
+                      <StageIcon
+                        size={14}
+                        className={isSpinning ? 'af-spin' : ''}
+                      />
+                      {stageBadgeText}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        textTransform: 'uppercase',
+                        padding: '1px 6px',
+                        borderRadius: '4px',
+                        background: 'var(--bg)',
+                        color: 'var(--text-muted)',
+                        border: '1px solid var(--line)',
+                      }}
+                    >
+                      {job.platform || 'video'}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: 'var(--text-sm)',
+                      fontWeight: 500,
+                      color: 'var(--text)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                    title={displayTitle}
+                  >
+                    {displayTitle}
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--text-muted)',
+                      marginTop: '2px',
+                    }}
+                  >
+                    <span>ID: {job.id.slice(0, 8)}</span>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        color: isReady ? 'var(--accent-label)' : 'inherit',
+                        fontWeight: isReady ? 600 : 'normal',
+                      }}
+                    >
+                      {isReady ? 'Review now' : 'View stage'}
+                      <ArrowRight size={12} />
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Search & Filter Bar (Section 6.8.D, FR-042, FR-043) */}
       <div
@@ -331,7 +572,9 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                 marginBottom: 'var(--space-2)',
               }}
             >
-              Nothing saved in your Library yet
+              {inProgressJobs.length > 0
+                ? 'Extractions in Progress'
+                : 'Nothing saved in your Library yet'}
             </h2>
             <p
               style={{
@@ -340,8 +583,9 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                 color: 'var(--text-muted)',
               }}
             >
-              Extract a YouTube Short or paste a transcript on Capture, review
-              the candidate, and confirm it to keep it here.
+              {inProgressJobs.length > 0
+                ? `You have ${inProgressJobs.length} active pipeline(s) processing above. Once reviewed and confirmed, they will appear in your permanent library.`
+                : 'Extract a YouTube Short or paste a transcript on Capture, review the candidate, and confirm it to keep it here.'}
             </p>
             <button
               type="button"
@@ -349,7 +593,11 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
               onClick={onGoToCapture}
             >
               <PlusCircle size={16} strokeWidth={1.5} />
-              <span>Go to Capture</span>
+              <span>
+                {inProgressJobs.length > 0
+                  ? 'Extract another video'
+                  : 'Go to Capture'}
+              </span>
             </button>
           </div>
         )

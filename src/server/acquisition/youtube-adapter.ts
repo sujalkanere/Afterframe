@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { safeFetch, SsrfBlockedError } from '../security/ssrf-guard.js';
 import { sanitizeErrorDetails } from '../security/redaction.js';
 import type {
@@ -18,6 +19,27 @@ export interface YouTubeAdapterConfig {
   baseUrl?: string;
   allowLocalTestServer?: boolean;
   timeoutMs?: number;
+}
+
+function getYtDlpPath(): string | null {
+  if (process.env.YTDLP_PATH && fs.existsSync(process.env.YTDLP_PATH)) {
+    return process.env.YTDLP_PATH;
+  }
+  const wingetBase = path.join(
+    process.env.LOCALAPPDATA ?? 'C:\\Users\\Sujal\\AppData\\Local',
+    'Microsoft\\WinGet\\Packages'
+  );
+  if (fs.existsSync(wingetBase)) {
+    try {
+      const entries = fs.readdirSync(wingetBase);
+      const ytDir = entries.find((e) => e.startsWith('yt-dlp.yt-dlp'));
+      if (ytDir) {
+        const fullPath = path.join(wingetBase, ytDir, 'yt-dlp.exe');
+        if (fs.existsSync(fullPath)) return fullPath;
+      }
+    } catch {}
+  }
+  return 'yt-dlp';
 }
 
 export class YouTubeShortsAdapter
@@ -213,7 +235,7 @@ export class YouTubeShortsAdapter
 
     try {
       const resp = await safeFetch(timedTextUrl, {
-        timeoutMs: this.config.timeoutMs ?? 10000,
+        timeoutMs: this.config.timeoutMs ?? 1500,
         allowLocalTestServer: this.isLocalAllowed(),
         headers: {
           Accept: 'application/json',
@@ -232,24 +254,12 @@ export class YouTubeShortsAdapter
       }
 
       if (!resp.ok) {
-        return {
-          ok: false,
-          errorCode: 'TRANSCRIPT_UNAVAILABLE',
-          safeErrorDetails: `YouTube timedtext returned HTTP ${resp.status}`,
-          userMessage:
-            'No public caption track was returned for this Short. Paste the transcript instead.',
-        };
+        return await this.transcribeVideoFallback(input);
       }
 
       const bodyText = await resp.text();
       if (!bodyText.trim()) {
-        return {
-          ok: false,
-          errorCode: 'TRANSCRIPT_UNAVAILABLE',
-          safeErrorDetails: 'Empty timedtext response body.',
-          userMessage:
-            'This Short has no accessible spoken captions. Paste the transcript instead.',
-        };
+        return await this.transcribeVideoFallback(input);
       }
 
       const parsed = JSON.parse(bodyText) as {
@@ -301,13 +311,7 @@ export class YouTubeShortsAdapter
       }
 
       if (segments.length === 0) {
-        return {
-          ok: false,
-          errorCode: 'TRANSCRIPT_UNAVAILABLE',
-          safeErrorDetails: 'Zero non-empty caption segments in timedtext payload.',
-          userMessage:
-            'This Short contains no spoken caption segments. Paste the transcript instead.',
-        };
+        return await this.transcribeVideoFallback(input);
       }
 
       return {
@@ -315,13 +319,365 @@ export class YouTubeShortsAdapter
         segments,
         providerId: 'youtube-timedtext-json3-v1',
       };
+    } catch {
+      return await this.transcribeVideoFallback(input);
+    }
+  }
+
+  private async transcribeVideoFallback(
+    input: SourceResolutionInput
+  ): Promise<TranscriptAcquisitionResult> {
+    const apiKey = (process.env.LLM_API_KEY ?? '').trim();
+    const geminiKey = (process.env.GEMINI_API_KEY ?? '').trim();
+    const baseUrl = (process.env.LLM_BASE_URL ?? '').trim();
+
+    const isGroq = apiKey.startsWith('gsk_') || baseUrl.includes('groq.com');
+    if (isGroq) {
+      const groqResult = await this.transcribeViaGroqWhisper(input);
+      if (groqResult.ok) {
+        return groqResult;
+      }
+    }
+
+    const isGoogleKey =
+      Boolean(geminiKey) ||
+      apiKey.startsWith('AIza') ||
+      baseUrl.includes('googleapis.com');
+
+    if (isGoogleKey) {
+      const geminiResult = await this.transcribeViaGemini(input);
+      if (geminiResult.ok) {
+        return geminiResult;
+      }
+    }
+
+    return {
+      ok: false,
+      errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      safeErrorDetails:
+        'Captions are unavailable on this video track and automatic audio transcription did not produce segments.',
+      userMessage:
+        'Captions could not be retrieved from YouTube. Retry transcription or paste the transcript instead.',
+    };
+  }
+
+  /**
+   * Transcribe YouTube video audio using Groq Whisper API (whisper-large-v3-turbo).
+   * Downloads the lightweight audio stream via yt-dlp and posts to Groq transcriptions endpoint.
+   */
+  private async transcribeViaGroqWhisper(
+    input: SourceResolutionInput
+  ): Promise<TranscriptAcquisitionResult> {
+    const apiKey = (process.env.LLM_API_KEY ?? '').trim();
+    if (!apiKey) {
+      return {
+        ok: false,
+        errorCode: 'TRANSCRIPT_UNAVAILABLE',
+        safeErrorDetails: 'LLM_API_KEY is not configured for Groq Whisper transcription.',
+        userMessage: 'No captions found and LLM_API_KEY is not configured. Paste the transcript instead.',
+      };
+    }
+
+    const ytdlp = getYtDlpPath();
+    if (!ytdlp) {
+      return {
+        ok: false,
+        errorCode: 'TRANSCRIPT_UNAVAILABLE',
+        safeErrorDetails: 'yt-dlp binary not found for audio download.',
+        userMessage: 'Audio download tool not available on this server. Paste the transcript instead.',
+      };
+    }
+
+    const videoUrl = `https://www.youtube.com/watch?v=${input.platformContentId}`;
+    const tempFile = path.resolve(
+      os.tmpdir(),
+      `af_audio_${input.platformContentId}_${Date.now()}.m4a`
+    );
+
+    try {
+      const { spawnSync } = await import('node:child_process');
+      const dlRes = spawnSync(
+        ytdlp,
+        [
+          '-f',
+          'worstaudio[ext=m4a]/ba[ext=m4a]/worst',
+          '-o',
+          tempFile,
+          '--force-overwrites',
+          '--no-warnings',
+          '--no-playlist',
+          '--fixup',
+          'never',
+          '--socket-timeout',
+          '5',
+          videoUrl,
+        ],
+        { timeout: 25000, stdio: ['ignore', 'ignore', 'pipe'] }
+      );
+
+      if (!fs.existsSync(tempFile)) {
+        const stderr = dlRes.stderr ? dlRes.stderr.toString('utf-8') : '';
+        return {
+          ok: false,
+          errorCode: 'TRANSCRIPT_UNAVAILABLE',
+          safeErrorDetails: `yt-dlp audio download failed: ${stderr.slice(0, 200)}`,
+          userMessage: 'Could not extract audio from this video. Paste the transcript instead.',
+        };
+      }
+
+      const fileBuffer = fs.readFileSync(tempFile);
+      const audioBlob = new Blob([fileBuffer], { type: 'audio/m4a' });
+      const form = new FormData();
+      form.append('file', audioBlob, 'audio.m4a');
+      form.append('model', 'whisper-large-v3-turbo');
+      form.append('response_format', 'verbose_json');
+
+      const whisperUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
+      const resp = await safeFetch(whisperUrl, {
+        method: 'POST',
+        timeoutMs: 45000,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: form,
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        return {
+          ok: false,
+          errorCode: 'TRANSCRIPT_UNAVAILABLE',
+          safeErrorDetails: `Groq Whisper returned HTTP ${resp.status}: ${errText.slice(0, 200)}`,
+          userMessage: `Automatic transcription failed (HTTP ${resp.status}). Paste the transcript instead.`,
+        };
+      }
+
+      const data = (await resp.json()) as {
+        text?: string;
+        segments?: Array<{ start?: number; end?: number; text?: string }>;
+        language?: string;
+      };
+
+      const rawSegments = data.segments ?? [];
+      const segments: AcquiredEvidenceItem[] = [];
+
+      for (const seg of rawSegments) {
+        const text = (seg.text ?? '').trim();
+        if (!text) continue;
+        const startMs =
+          typeof seg.start === 'number' && seg.start >= 0
+            ? Math.round(seg.start * 1000)
+            : null;
+        const endMs =
+          typeof seg.end === 'number' && seg.end >= 0
+            ? Math.round(seg.end * 1000)
+            : null;
+
+        segments.push({
+          kind: 'caption',
+          contentText: text,
+          contentRef: `${input.canonicalUrl}#t=${
+            startMs !== null ? Math.floor(startMs / 1000) : 0
+          }`,
+          startMs,
+          endMs,
+          language: data.language ?? 'en',
+          provenance: 'groq-whisper-v3-turbo',
+          limitations: [
+            'Auto-transcribed directly from video audio stream via Groq Whisper API.',
+          ],
+          metadata: {},
+        });
+      }
+
+      if (segments.length === 0 && data.text?.trim()) {
+        segments.push({
+          kind: 'caption',
+          contentText: data.text.trim(),
+          contentRef: `${input.canonicalUrl}#t=0`,
+          startMs: 0,
+          endMs: 60000,
+          language: data.language ?? 'en',
+          provenance: 'groq-whisper-v3-turbo',
+          limitations: [
+            'Auto-transcribed directly from video audio stream via Groq Whisper API.',
+          ],
+          metadata: {},
+        });
+      }
+
+      if (segments.length === 0) {
+        return {
+          ok: false,
+          errorCode: 'TRANSCRIPT_UNAVAILABLE',
+          safeErrorDetails: 'Groq Whisper returned 0 segments.',
+          userMessage:
+            'This video contains no audible speech. Paste the transcript instead.',
+        };
+      }
+
+      return {
+        ok: true,
+        segments,
+        providerId: 'groq-whisper-v3-turbo',
+      };
     } catch (err) {
       return {
         ok: false,
         errorCode: 'TRANSCRIPT_UNAVAILABLE',
         safeErrorDetails: sanitizeErrorDetails(err),
-        userMessage:
-          'Captions could not be retrieved from YouTube. Retry transcription or paste the transcript instead.',
+        userMessage: 'Automatic video transcription failed. Paste the transcript instead.',
+      };
+    } finally {
+      if (fs.existsSync(tempFile)) {
+        try {
+          fs.unlinkSync(tempFile);
+        } catch {}
+      }
+    }
+  }
+
+  /**
+   * Directly transcribe YouTube video audio via Gemini multimodal generateContent API.
+   * Works on all public YouTube Shorts & Videos without scraping blocks.
+   */
+  private async transcribeViaGemini(
+    input: SourceResolutionInput
+  ): Promise<TranscriptAcquisitionResult> {
+    const apiKey =
+      (process.env.GEMINI_API_KEY ?? '').trim() ||
+      ((process.env.LLM_BASE_URL ?? '').includes('googleapis.com')
+        ? (process.env.LLM_API_KEY ?? '').trim()
+        : '');
+
+    if (!apiKey || apiKey.startsWith('gsk_')) {
+      return {
+        ok: false,
+        errorCode: 'TRANSCRIPT_UNAVAILABLE',
+        safeErrorDetails: 'GEMINI_API_KEY is not configured for automatic Gemini transcription.',
+        userMessage: 'No captions found and GEMINI_API_KEY is not configured. Paste the transcript instead.',
+      };
+    }
+
+    const model = process.env.GEMINI_MODEL ?? process.env.LLM_MODEL ?? 'gemini-2.5-flash';
+    const videoUrl = `https://www.youtube.com/watch?v=${input.platformContentId}`;
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+    try {
+      const resp = await safeFetch(endpoint, {
+        method: 'POST',
+        timeoutMs: 45000,
+        allowLocalTestServer: this.isLocalAllowed(),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  file_data: {
+                    file_uri: videoUrl,
+                    mime_type: 'video/mp4',
+                  },
+                },
+                {
+                  text: 'Transcribe the spoken audio of this video into a JSON array of caption segments with start_ms, end_ms, and text. Keep segments concise (1-2 sentences each). Output format: [{"start_ms": 0, "end_ms": 5000, "text": "..."}]',
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            response_mime_type: 'application/json',
+            temperature: 0.1,
+          },
+        }),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        return {
+          ok: false,
+          errorCode: 'TRANSCRIPT_UNAVAILABLE',
+          safeErrorDetails: `Gemini video transcription returned HTTP ${resp.status}: ${errText.slice(0, 200)}`,
+          userMessage: `Automatic video transcription failed (HTTP ${resp.status}: ${errText.slice(0, 150)}). Paste the transcript instead.`,
+        };
+      }
+
+      const data = (await resp.json()) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{ text?: string }>;
+          };
+        }>;
+      };
+
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      let parsedSegments: Array<{ start_ms?: number; end_ms?: number; text?: string }> = [];
+
+      try {
+        const parsed = JSON.parse(rawText);
+        if (Array.isArray(parsed)) {
+          parsedSegments = parsed;
+        } else if (Array.isArray((parsed as any).segments)) {
+          parsedSegments = (parsed as any).segments;
+        }
+      } catch {
+        return {
+          ok: false,
+          errorCode: 'TRANSCRIPT_UNAVAILABLE',
+          safeErrorDetails: 'Could not parse Gemini transcription JSON.',
+          userMessage: 'Transcription parsing failed. Paste the transcript instead.',
+        };
+      }
+
+      const segments: AcquiredEvidenceItem[] = [];
+      for (const seg of parsedSegments) {
+        const text = (seg.text ?? '').trim();
+        if (!text) continue;
+
+        const startMs = typeof seg.start_ms === 'number' && seg.start_ms >= 0 ? Math.round(seg.start_ms) : null;
+        const endMs = typeof seg.end_ms === 'number' && seg.end_ms >= 0 ? Math.round(seg.end_ms) : null;
+
+        segments.push({
+          kind: 'caption',
+          contentText: text,
+          contentRef: `${input.canonicalUrl}#t=${startMs !== null ? Math.floor(startMs / 1000) : 0}`,
+          startMs,
+          endMs,
+          language: 'en',
+          provenance: 'gemini-multimodal-transcription-v1',
+          limitations: [
+            'Auto-transcribed directly from video stream via Gemini API.',
+          ],
+          metadata: {},
+        });
+      }
+
+      if (segments.length === 0) {
+        return {
+          ok: false,
+          errorCode: 'TRANSCRIPT_UNAVAILABLE',
+          safeErrorDetails: 'Gemini transcription produced 0 segments.',
+          userMessage: 'This video contains no audible speech. Paste the transcript instead.',
+        };
+      }
+
+      return {
+        ok: true,
+        segments,
+        providerId: 'gemini-multimodal-transcription-v1',
+      };
+    } catch (err) {
+      const details = sanitizeErrorDetails(err);
+      return {
+        ok: false,
+        errorCode: 'TRANSCRIPT_UNAVAILABLE',
+        safeErrorDetails: details,
+        userMessage: `Automatic transcription failed (${details}). Paste the transcript instead.`,
       };
     }
   }

@@ -12,7 +12,7 @@ export class SsrfBlockedError extends Error {
 export interface SafeFetchOptions {
   method?: 'GET' | 'POST';
   headers?: Record<string, string>;
-  body?: string;
+  body?: BodyInit | null;
   timeoutMs?: number;
   maxRedirects?: number;
   allowLocalTestServer?: boolean;

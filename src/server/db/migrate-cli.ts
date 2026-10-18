@@ -1,4 +1,7 @@
+import { loadEnvFile } from '../env.js';
 import { createDatabase } from './index.js';
+
+loadEnvFile();
 
 async function main() {
   const db = await createDatabase();

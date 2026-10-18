@@ -1,8 +1,11 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import express from 'express';
+import { loadEnvFile } from './env.js';
 import { createDatabase } from './db/index.js';
 import { createApiApp } from './app.js';
+
+loadEnvFile();
 
 async function startServer() {
   const port = Number(process.env.PORT ?? 3000);

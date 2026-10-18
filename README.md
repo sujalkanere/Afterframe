@@ -47,8 +47,8 @@ To automatically synthesize video transcripts into dual **Task + AI Skill (`Skil
 | Environment Variable | Default | Description & Examples |
 |---|---|---|
 | `LLM_API_KEY` | *(unset)* | API key for your LLM provider (`sk-...` for OpenAI / OpenRouter / Groq / Together, or `ollama` for local Ollama). |
-| `LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible base URL:<br>• OpenAI: `https://api.openai.com/v1`<br>• OpenRouter: `https://openrouter.ai/api/v1`<br>• Groq: `https://api.groq.com/openai/v1`<br>• Local Ollama: `http://localhost:11434/v1` |
-| `LLM_MODEL` | `gpt-4o-mini` | Model identifier supporting JSON mode (`gpt-4o-mini`, `gpt-4o`, `llama-3.3-70b-versatile`, `qwen2.5-coder:14b`). |
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible base URL:<br>• Google AI Studio: `https://generativelanguage.googleapis.com/v1beta/openai`<br>• OpenAI: `https://api.openai.com/v1`<br>• OpenRouter: `https://openrouter.ai/api/v1`<br>• Groq: `https://api.groq.com/openai/v1`<br>• Local Ollama: `http://localhost:11434/v1` |
+| `LLM_MODEL` | `gpt-4o-mini` | Model identifier supporting JSON mode (`gemini-3.6-flash`, `gpt-4o-mini`, `gpt-4o`, `llama-3.3-70b-versatile`, `qwen2.5-coder:14b`). |
 | `LLM_TIMEOUT_MS` | `30000` | Per-request timeout in milliseconds for LLM extraction calls. |
 
 ### Optional Infrastructure & Connector Variables

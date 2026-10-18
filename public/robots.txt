@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /privacy
+Allow: /terms
+Disallow: /api/
+Disallow: /app/
+
+Sitemap: https://afterframe.app/sitemap.xml
